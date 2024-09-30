@@ -45,6 +45,7 @@ from transformers import CLIPTextModelWithProjection, CLIPTokenizer, PretrainedC
 
 from optimum.habana import GaudiConfig
 from optimum.habana.accelerate import GaudiAccelerator
+from optimum.habana.diffusers import GaudiStableDiffusion3Pipeline
 from optimum.habana.transformers.modeling_utils import adapt_transformers_to_gaudi
 
 import diffusers
@@ -52,7 +53,7 @@ from diffusers import (
     AutoencoderKL,
     FlowMatchEulerDiscreteScheduler,
     SD3Transformer2DModel,
-    StableDiffusion3Pipeline,
+# FIXME: remove?    StableDiffusion3Pipeline,
 )
 from diffusers.optimization import get_scheduler
 from diffusers.utils import (
@@ -1017,11 +1018,15 @@ def main(args):
                 torch_dtype = torch.float16
             elif args.prior_generation_precision == "bf16":
                 torch_dtype = torch.bfloat16
-            pipeline = StableDiffusion3Pipeline.from_pretrained(
+            pipeline = GaudiStableDiffusion3Pipeline.from_pretrained(
                 args.pretrained_model_name_or_path,
                 torch_dtype=torch_dtype,
                 revision=args.revision,
                 variant=args.variant,
+                scheduler=noise_scheduler,
+                use_habana=True,
+                use_hpu_graphs=args.use_hpu_graphs_for_inference,
+                gaudi_config=args.gaudi_config_name,
             )
             pipeline.set_progress_bar_config(disable=True)
 
@@ -1680,7 +1685,7 @@ def main(args):
                     text_encoder_one, text_encoder_two, text_encoder_three = load_text_encoders(
                         accelerator, text_encoder_cls_one, text_encoder_cls_two, text_encoder_cls_three
                     )
-                pipeline = StableDiffusion3Pipeline.from_pretrained(
+                pipeline = GaudiStableDiffusion3Pipeline.from_pretrained(
                     args.pretrained_model_name_or_path,
                     vae=vae,
                     text_encoder=accelerator.unwrap_model(text_encoder_one),
@@ -1690,6 +1695,10 @@ def main(args):
                     revision=args.revision,
                     variant=args.variant,
                     torch_dtype=weight_dtype,
+                    scheduler=noise_scheduler,
+                    use_habana=True,
+                    use_hpu_graphs=args.use_hpu_graphs_for_inference,
+                    gaudi_config=args.gaudi_config_name,
                 )
                 pipeline_args = {"prompt": args.validation_prompt}
                 images = log_validation(
@@ -1713,16 +1722,24 @@ def main(args):
             text_encoder_one = unwrap_model(text_encoder_one)
             text_encoder_two = unwrap_model(text_encoder_two)
             text_encoder_three = unwrap_model(text_encoder_three)
-            pipeline = StableDiffusion3Pipeline.from_pretrained(
+            pipeline = GaudiStableDiffusion3Pipeline.from_pretrained(
                 args.pretrained_model_name_or_path,
                 transformer=transformer,
                 text_encoder=text_encoder_one,
                 text_encoder_2=text_encoder_two,
                 text_encoder_3=text_encoder_three,
+                scheduler=noise_scheduler,
+                use_habana=True,
+                use_hpu_graphs=args.use_hpu_graphs_for_inference,
+                gaudi_config=args.gaudi_config_name,
             )
         else:
-            pipeline = StableDiffusion3Pipeline.from_pretrained(
-                args.pretrained_model_name_or_path, transformer=transformer
+            pipeline = GaudiStableDiffusion3Pipeline.from_pretrained(
+                args.pretrained_model_name_or_path, transformer=transformer,
+                scheduler=noise_scheduler,
+                use_habana=True,
+                use_hpu_graphs=args.use_hpu_graphs_for_inference,
+                gaudi_config=args.gaudi_config_name,
             )
 
         # save the pipeline
@@ -1730,11 +1747,15 @@ def main(args):
 
         # Final inference
         # Load previous pipeline
-        pipeline = StableDiffusion3Pipeline.from_pretrained(
+        pipeline = GaudiStableDiffusion3Pipeline.from_pretrained(
             args.output_dir,
             revision=args.revision,
             variant=args.variant,
             torch_dtype=weight_dtype,
+            scheduler=noise_scheduler,
+            use_habana=True,
+            use_hpu_graphs=args.use_hpu_graphs_for_inference,
+            gaudi_config=args.gaudi_config_name,
         )
 
         # run inference
