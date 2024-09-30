@@ -1124,7 +1124,9 @@ def main(args):
     # For mixed precision training we cast all non-trainable weights (vae, non-lora text_encoder and non-lora transformer) to half-precision
     # as these weights are only used for inference, keeping weights in full precision is not required.
     weight_dtype = torch.float32
-    if accelerator.mixed_precision == "fp16":
+    if gaudi_config.use_torch_autocast:
+        weight_dtype = torch.bfloat16
+    elif accelerator.mixed_precision == "fp16":
         weight_dtype = torch.float16
     elif accelerator.mixed_precision == "bf16":
         weight_dtype = torch.bfloat16
