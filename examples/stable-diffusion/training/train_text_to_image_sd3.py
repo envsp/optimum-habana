@@ -136,16 +136,16 @@ Please adhere to the licensing terms as described `[here](https://huggingface.co
     model_card.save(os.path.join(repo_folder, "README.md"))
 
 
-def load_text_encoders(class_one, class_two, class_three):
+def load_text_encoders(accelerator, class_one, class_two, class_three):
     text_encoder_one = class_one.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision, variant=args.variant
-    )
+    ).to(accelerator.device)
     text_encoder_two = class_two.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="text_encoder_2", revision=args.revision, variant=args.variant
-    )
+    ).to(accelerator.device)
     text_encoder_three = class_three.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="text_encoder_3", revision=args.revision, variant=args.variant
-    )
+    ).to(accelerator.device)
     return text_encoder_one, text_encoder_two, text_encoder_three
 
 
@@ -1093,7 +1093,7 @@ def main(args):
     )
     noise_scheduler_copy = copy.deepcopy(noise_scheduler)
     text_encoder_one, text_encoder_two, text_encoder_three = load_text_encoders(
-        text_encoder_cls_one, text_encoder_cls_two, text_encoder_cls_three
+        accelerator, text_encoder_cls_one, text_encoder_cls_two, text_encoder_cls_three
     )
     vae = AutoencoderKL.from_pretrained(
         args.pretrained_model_name_or_path,
@@ -1678,7 +1678,7 @@ def main(args):
                 # create pipeline
                 if not args.train_text_encoder:
                     text_encoder_one, text_encoder_two, text_encoder_three = load_text_encoders(
-                        text_encoder_cls_one, text_encoder_cls_two, text_encoder_cls_three
+                        accelerator, text_encoder_cls_one, text_encoder_cls_two, text_encoder_cls_three
                     )
                 pipeline = StableDiffusion3Pipeline.from_pretrained(
                     args.pretrained_model_name_or_path,
