@@ -45,6 +45,7 @@ from transformers import CLIPTextModelWithProjection, CLIPTokenizer, PretrainedC
 
 from optimum.habana import GaudiConfig
 from optimum.habana.accelerate import GaudiAccelerator
+from optimum.habana.transformers.modeling_utils import adapt_transformers_to_gaudi
 
 import diffusers
 from diffusers import (
@@ -971,6 +972,8 @@ def main(args):
         force_autocast=gaudi_config.use_torch_autocast,
         kwargs_handlers=[kwargs],
     )
+
+    adapt_transformers_to_gaudi()
 
     # Disable AMP for MPS.
     if torch.backends.mps.is_available():
