@@ -43,6 +43,9 @@ from torchvision.transforms.functional import crop
 from tqdm.auto import tqdm
 from transformers import CLIPTextModelWithProjection, CLIPTokenizer, PretrainedConfig, T5EncoderModel, T5TokenizerFast
 
+from optimum.habana import GaudiConfig
+from optimum.habana.accelerate import GaudiAccelerator
+
 import diffusers
 from diffusers import (
     AutoencoderKL,
@@ -579,6 +582,12 @@ def parse_args(input_args=None):
         ),
     )
     parser.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
+    parser.add_argument(
+        "--gaudi_config_name",
+        type=str,
+        default=None,
+        help="Local path to the Gaudi configuration file or its name on the Hugging Face Hub.",
+    )
 
     if input_args is not None:
         args = parser.parse_args(input_args)
@@ -952,11 +961,14 @@ def main(args):
 
     accelerator_project_config = ProjectConfiguration(project_dir=args.output_dir, logging_dir=logging_dir)
     kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
-    accelerator = Accelerator(
+    gaudi_config = GaudiConfig.from_pretrained(args.gaudi_config_name)
+    gaudi_config.use_torch_autocast = gaudi_config.use_torch_autocast or args.bf16
+    accelerator = GaudiAccelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
-        mixed_precision=args.mixed_precision,
+        mixed_precision="bf16" if gaudi_config.use_torch_autocast else "no",
         log_with=args.report_to,
         project_config=accelerator_project_config,
+        force_autocast=gaudi_config.use_torch_autocast,
         kwargs_handlers=[kwargs],
     )
 
