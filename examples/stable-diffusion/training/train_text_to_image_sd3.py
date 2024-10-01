@@ -1010,14 +1010,16 @@ def main(args):
         cur_class_images = len(list(class_images_dir.iterdir()))
 
         if cur_class_images < args.num_class_images:
-            has_supported_fp16_accelerator = torch.cuda.is_available() or torch.backends.mps.is_available()
-            torch_dtype = torch.float16 if has_supported_fp16_accelerator else torch.float32
-            if args.prior_generation_precision == "fp32":
-                torch_dtype = torch.float32
-            elif args.prior_generation_precision == "fp16":
-                torch_dtype = torch.float16
-            elif args.prior_generation_precision == "bf16":
-                torch_dtype = torch.bfloat16
+            # FIXME: use bf16 for now
+            torch_dtype = torch.bfloat16
+            # has_supported_fp16_accelerator = torch.cuda.is_available() or torch.backends.mps.is_available()
+            # torch_dtype = torch.float16 if has_supported_fp16_accelerator else torch.float32
+            # if args.prior_generation_precision == "fp32":
+            #     torch_dtype = torch.float32
+            # elif args.prior_generation_precision == "fp16":
+            #     torch_dtype = torch.float16
+            # elif args.prior_generation_precision == "bf16":
+            #     torch_dtype = torch.bfloat16
             pipeline = GaudiStableDiffusion3Pipeline.from_pretrained(
                 args.pretrained_model_name_or_path,
                 torch_dtype=torch_dtype,
