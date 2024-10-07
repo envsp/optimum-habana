@@ -563,15 +563,10 @@ def parse_args(input_args=None):
         ),
     )
     parser.add_argument(
-        "--mixed_precision",
-        type=str,
-        default=None,
-        choices=["no", "fp16", "bf16"],
-        help=(
-            "Whether to use mixed precision. Choose between fp16 and bf16 (bfloat16). Bf16 requires PyTorch >="
-            " 1.10.and an Nvidia Ampere GPU.  Default to the value of accelerate config of the current system or the"
-            " flag passed with the `accelerate.launch` command. Use this argument to override the accelerate config."
-        ),
+        "--bf16",
+        action="store_true",
+        default=False,
+        help=("Whether to use bf16 mixed precision."),
     )
     parser.add_argument(
         "--prior_generation_precision",
