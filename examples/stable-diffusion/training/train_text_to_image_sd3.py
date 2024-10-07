@@ -585,6 +585,16 @@ def parse_args(input_args=None):
         default=None,
         help="Local path to the Gaudi configuration file or its name on the Hugging Face Hub.",
     )
+    parser.add_argument(
+        "--use_hpu_graphs_for_training",
+        action="store_true",
+        help="Use HPU graphs for training on HPU.",
+    )
+    parser.add_argument(
+        "--use_hpu_graphs_for_inference",
+        action="store_true",
+        help="Use HPU graphs for inference on HPU.",
+    )
 
     if input_args is not None:
         args = parser.parse_args(input_args)
