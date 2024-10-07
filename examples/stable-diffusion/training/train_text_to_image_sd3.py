@@ -1156,7 +1156,7 @@ def main(args):
             text_encoder_one.gradient_checkpointing_enable()
             text_encoder_two.gradient_checkpointing_enable()
             text_encoder_three.gradient_checkpointing_enable()
-    transformer.to(accelerator.device)
+    transformer.to(accelerator.device, dtype=weight_dtype)
 
     def unwrap_model(model):
         model = accelerator.unwrap_model(model)
