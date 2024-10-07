@@ -30,7 +30,7 @@ import numpy as np
 import torch
 import torch.utils.checkpoint
 import transformers
-from accelerate import Accelerator
+# from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import DistributedDataParallelKwargs, ProjectConfiguration, set_seed
 from huggingface_hub import create_repo, upload_folder
