@@ -589,6 +589,16 @@ def parse_args(input_args=None):
         help="Local path to the Gaudi configuration file or its name on the Hugging Face Hub.",
     )
     parser.add_argument(
+        "--throughput_warmup_steps",
+        type=int,
+        default=0,
+        help=(
+            "Number of steps to ignore for throughput calculation. For example, with throughput_warmup_steps=N, the"
+            " first N steps will not be considered in the calculation of the throughput. This is especially useful in"
+            " lazy mode."
+        ),
+    )
+    parser.add_argument(
         "--use_hpu_graphs_for_training",
         action="store_true",
         help="Use HPU graphs for training on HPU.",
@@ -597,6 +607,30 @@ def parse_args(input_args=None):
         "--use_hpu_graphs_for_inference",
         action="store_true",
         help="Use HPU graphs for inference on HPU.",
+    )
+    parser.add_argument(
+        "--profiling_warmup_steps",
+        default=0,
+        type=int,
+        help="Number of steps to ignore for profiling.",
+    )
+    parser.add_argument(
+        "--profiling_steps",
+        default=0,
+        type=int,
+        help="Number of steps to capture for profiling.",
+    )
+    parser.add_argument(
+        "--logging_step",
+        default=1,
+        type=int,
+        help="Print the loss for every logging_step.",
+    )
+    parser.add_argument(
+        "--adjust_throughput",
+        default=False,
+        action="store_true",
+        help="Checkpoint saving takes a lot of time. Ignore time for checkpoint saving for throughput calculations",
     )
 
     if input_args is not None:
