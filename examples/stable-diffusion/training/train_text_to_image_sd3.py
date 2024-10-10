@@ -51,6 +51,9 @@ from optimum.habana.diffusers import GaudiStableDiffusion3Pipeline
 from optimum.habana.transformers.modeling_utils import adapt_transformers_to_gaudi
 from optimum.habana.utils import HabanaProfile, set_seed, to_gb_rounded
 
+import habana_frameworks.torch as htorch
+import habana_frameworks.torch.core as htcore
+
 import diffusers
 from diffusers import (
     AutoencoderKL,
