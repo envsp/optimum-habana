@@ -49,6 +49,7 @@ from optimum.habana import GaudiConfig
 from optimum.habana.accelerate import GaudiAccelerator
 from optimum.habana.diffusers import GaudiStableDiffusion3Pipeline
 from optimum.habana.transformers.modeling_utils import adapt_transformers_to_gaudi
+from optimum.habana.utils import HabanaProfile, set_seed, to_gb_rounded
 
 import diffusers
 from diffusers import (
@@ -1463,6 +1464,12 @@ def main(args):
     if accelerator.is_main_process:
         tracker_name = "dreambooth-sd3"
         accelerator.init_trackers(tracker_name, config=vars(args))
+
+    hb_profiler = HabanaProfile(
+        warmup=args.profiling_warmup_steps,
+        active=args.profiling_steps,
+        record_shapes=False,
+    )
 
     # Train!
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
