@@ -17,11 +17,13 @@ import argparse
 import copy
 import gc
 import itertools
+import json
 import logging
 import math
 import os
 import random
 import shutil
+import time
 import warnings
 from contextlib import nullcontext
 from pathlib import Path
@@ -47,6 +49,10 @@ from optimum.habana import GaudiConfig
 from optimum.habana.accelerate import GaudiAccelerator
 from optimum.habana.diffusers import GaudiStableDiffusion3Pipeline
 from optimum.habana.transformers.modeling_utils import adapt_transformers_to_gaudi
+from optimum.habana.utils import HabanaProfile, set_seed, to_gb_rounded
+
+import habana_frameworks.torch as htorch
+import habana_frameworks.torch.core as htcore
 
 import diffusers
 from diffusers import (
@@ -586,6 +592,16 @@ def parse_args(input_args=None):
         help="Local path to the Gaudi configuration file or its name on the Hugging Face Hub.",
     )
     parser.add_argument(
+        "--throughput_warmup_steps",
+        type=int,
+        default=0,
+        help=(
+            "Number of steps to ignore for throughput calculation. For example, with throughput_warmup_steps=N, the"
+            " first N steps will not be considered in the calculation of the throughput. This is especially useful in"
+            " lazy mode."
+        ),
+    )
+    parser.add_argument(
         "--use_hpu_graphs_for_training",
         action="store_true",
         help="Use HPU graphs for training on HPU.",
@@ -594,6 +610,30 @@ def parse_args(input_args=None):
         "--use_hpu_graphs_for_inference",
         action="store_true",
         help="Use HPU graphs for inference on HPU.",
+    )
+    parser.add_argument(
+        "--profiling_warmup_steps",
+        default=0,
+        type=int,
+        help="Number of steps to ignore for profiling.",
+    )
+    parser.add_argument(
+        "--profiling_steps",
+        default=0,
+        type=int,
+        help="Number of steps to capture for profiling.",
+    )
+    parser.add_argument(
+        "--logging_step",
+        default=1,
+        type=int,
+        help="Print the loss for every logging_step.",
+    )
+    parser.add_argument(
+        "--adjust_throughput",
+        default=False,
+        action="store_true",
+        help="Checkpoint saving takes a lot of time. Ignore time for checkpoint saving for throughput calculations",
     )
 
     if input_args is not None:
@@ -1460,6 +1500,12 @@ def main(args):
         tracker_name = "dreambooth-sd3"
         accelerator.init_trackers(tracker_name, config=vars(args))
 
+    hb_profiler = HabanaProfile(
+        warmup=args.profiling_warmup_steps,
+        active=args.profiling_steps,
+        record_shapes=False,
+    )
+
     # Train!
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
 
@@ -1521,7 +1567,16 @@ def main(args):
             sigma = sigma.unsqueeze(-1)
         return sigma
 
+    t0 = None
+    t_start = time.perf_counter()
+    train_loss = torch.tensor(0, dtype=torch.float, device="hpu")
+    checkpoint_time = 0
+
     for epoch in range(first_epoch, args.num_train_epochs):
+        train_loss.zero_()
+        if hb_profiler:
+            hb_profiler.start()
+
         transformer.train()
         if args.train_text_encoder:
             text_encoder_one.train()
@@ -1529,6 +1584,8 @@ def main(args):
             text_encoder_three.train()
 
         for step, batch in enumerate(train_dataloader):
+            if t0 is None and global_step == args.throughput_warmup_steps:
+                t0 = time.perf_counter()
             models_to_accumulate = [transformer]
             if args.train_text_encoder:
                 models_to_accumulate.extend([text_encoder_one, text_encoder_two, text_encoder_three])
@@ -1633,7 +1690,14 @@ def main(args):
                     # Add the prior loss to the instance loss.
                     loss = loss + args.prior_loss_weight * prior_loss
 
+                # Gather the losses across all processes for logging (if we use distributed training).
+                avg_loss = accelerator.gather(loss.repeat(args.train_batch_size)).mean()
+                train_loss += avg_loss / args.gradient_accumulation_steps
+
                 accelerator.backward(loss)
+
+                htcore.mark_step()
+
                 if accelerator.sync_gradients:
                     params_to_clip = (
                         itertools.chain(
@@ -1650,6 +1714,8 @@ def main(args):
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
+                htcore.mark_step()
+                hb_profiler.step()
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
@@ -1657,7 +1723,8 @@ def main(args):
                 global_step += 1
 
                 if accelerator.is_main_process:
-                    if global_step % args.checkpointing_steps == 0:
+                    if args.checkpointing_steps is not None and global_step % args.checkpointing_steps == 0:
+                        t_chkpt_start = time.perf_counter()
                         # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
                         if args.checkpoints_total_limit is not None:
                             checkpoints = os.listdir(args.output_dir)
@@ -1681,14 +1748,36 @@ def main(args):
                         save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
                         accelerator.save_state(save_path)
                         logger.info(f"Saved state to {save_path}")
+                        t_chkpt_end = time.perf_counter()
+                        checkpoint_time += t_chkpt_end - t_chkpt_start
 
-            logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
-            progress_bar.set_postfix(**logs)
+                if (global_step - 1) % args.logging_step == 0 or global_step == args.max_train_steps:
+                    train_loss_scalar = train_loss.item()
+                    accelerator.log({"train_loss": train_loss_scalar}, step=global_step)
+
+                    if args.gradient_accumulation_steps > 1:
+                        logs = {
+                            "step_loss": loss.item(),
+                            "lr": lr_scheduler.get_last_lr()[0],
+                            "mem_used": to_gb_rounded(htorch.hpu.memory_allocated()),
+                        }
+                    else:
+                        logs = {
+                            "step_loss": train_loss_scalar,
+                            "lr": lr_scheduler.get_last_lr()[0],
+                            "mem_used": to_gb_rounded(htorch.hpu.memory_allocated()),
+                        }
+                    progress_bar.set_postfix(**logs)
+                train_loss.zero_()
+
+#            logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
+#            progress_bar.set_postfix(**logs)
             accelerator.log(logs, step=global_step)
 
             if global_step >= args.max_train_steps:
                 break
 
+        hb_profiler.stop()
         if accelerator.is_main_process:
             if args.validation_prompt is not None and epoch % args.validation_epochs == 0:
                 # create pipeline
@@ -1723,6 +1812,23 @@ def main(args):
                     del text_encoder_one, text_encoder_two, text_encoder_three
                     torch.cuda.empty_cache()
                     gc.collect()
+
+    if t0 is not None:
+        duration = time.perf_counter() - t0 - (checkpoint_time if args.adjust_throughput else 0)
+        ttt = time.perf_counter() - t_start
+        throughput = (args.max_train_steps - args.throughput_warmup_steps) * total_batch_size / duration
+
+        accelerator.wait_for_everyone()
+        if accelerator.is_main_process:
+            logger.info(f"Throughput = {throughput} samples/s")
+            logger.info(f"Train runtime = {duration} seconds")
+            logger.info(f"Total Train runtime = {ttt} seconds")
+            metrics = {
+                "train_samples_per_second": throughput,
+                "train_runtime": duration,
+            }
+            with open(f"{args.output_dir}/speed_metrics.json", mode="w") as file:
+                json.dump(metrics, file)
 
     # Save the lora layers
     accelerator.wait_for_everyone()
