@@ -1523,7 +1523,16 @@ def main(args):
             sigma = sigma.unsqueeze(-1)
         return sigma
 
+    t0 = None
+    t_start = time.perf_counter()
+    train_loss = torch.tensor(0, dtype=torch.float, device="hpu")
+    checkpoint_time = 0
+
     for epoch in range(first_epoch, args.num_train_epochs):
+        train_loss.zero_()
+        if hb_profiler:
+            hb_profiler.start()
+
         transformer.train()
         if args.train_text_encoder:
             text_encoder_one.train()
@@ -1531,6 +1540,8 @@ def main(args):
             text_encoder_three.train()
 
         for step, batch in enumerate(train_dataloader):
+            if t0 is None and global_step == args.throughput_warmup_steps:
+                t0 = time.perf_counter()
             models_to_accumulate = [transformer]
             if args.train_text_encoder:
                 models_to_accumulate.extend([text_encoder_one, text_encoder_two, text_encoder_three])
@@ -1635,7 +1646,12 @@ def main(args):
                     # Add the prior loss to the instance loss.
                     loss = loss + args.prior_loss_weight * prior_loss
 
+                train_loss += avg_loss / args.gradient_accumulation_steps
+
                 accelerator.backward(loss)
+
+                htcore.mark_step()
+
                 if accelerator.sync_gradients:
                     params_to_clip = (
                         itertools.chain(
@@ -1652,6 +1668,8 @@ def main(args):
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
+                htcore.mark_step()
+                hb_profiler.step()
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
@@ -1659,7 +1677,8 @@ def main(args):
                 global_step += 1
 
                 if accelerator.is_main_process:
-                    if global_step % args.checkpointing_steps == 0:
+                    if args.checkpointing_steps is not None and global_step % args.checkpointing_steps == 0:
+                        t_chkpt_start = time.perf_counter()
                         # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
                         if args.checkpoints_total_limit is not None:
                             checkpoints = os.listdir(args.output_dir)
@@ -1683,6 +1702,27 @@ def main(args):
                         save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
                         accelerator.save_state(save_path)
                         logger.info(f"Saved state to {save_path}")
+                        t_chkpt_end = time.perf_counter()
+                        checkpoint_time += t_chkpt_end - t_chkpt_start
+
+                if (global_step - 1) % args.logging_step == 0 or global_step == args.max_train_steps:
+                    train_loss_scalar = train_loss.item()
+                    accelerator.log({"train_loss": train_loss_scalar}, step=global_step)
+
+                    if args.gradient_accumulation_steps > 1:
+                        logs = {
+                            "step_loss": loss.item(),
+                            "lr": lr_scheduler.get_last_lr()[0],
+                            "mem_used": to_gb_rounded(htorch.hpu.memory_allocated()),
+                        }
+                    else:
+                        logs = {
+                            "step_loss": train_loss_scalar,
+                            "lr": lr_scheduler.get_last_lr()[0],
+                            "mem_used": to_gb_rounded(htorch.hpu.memory_allocated()),
+                        }
+                    progress_bar.set_postfix(**logs)
+                train_loss.zero_()
 
             logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             progress_bar.set_postfix(**logs)
@@ -1691,6 +1731,7 @@ def main(args):
             if global_step >= args.max_train_steps:
                 break
 
+        hb_profiler.stop()
         if accelerator.is_main_process:
             if args.validation_prompt is not None and epoch % args.validation_epochs == 0:
                 # create pipeline
@@ -1725,6 +1766,23 @@ def main(args):
                     del text_encoder_one, text_encoder_two, text_encoder_three
                     torch.cuda.empty_cache()
                     gc.collect()
+
+    if t0 is not None:
+        duration = time.perf_counter() - t0 - (checkpoint_time if args.adjust_throughput else 0)
+        ttt = time.perf_counter() - t_start
+        throughput = (args.max_train_steps - args.throughput_warmup_steps) * total_batch_size / duration
+
+        accelerator.wait_for_everyone()
+        if accelerator.is_main_process:
+            logger.info(f"Throughput = {throughput} samples/s")
+            logger.info(f"Train runtime = {duration} seconds")
+            logger.info(f"Total Train runtime = {ttt} seconds")
+            metrics = {
+                "train_samples_per_second": throughput,
+                "train_runtime": duration,
+            }
+            with open(f"{args.output_dir}/speed_metrics.json", mode="w") as file:
+                json.dump(metrics, file)
 
     # Save the lora layers
     accelerator.wait_for_everyone()
