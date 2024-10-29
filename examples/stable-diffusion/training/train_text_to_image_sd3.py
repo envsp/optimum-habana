@@ -1021,6 +1021,9 @@ def main(args):
 
     adapt_transformers_to_gaudi()
 
+    # FIXME: debug disable amp
+    accelerator.native_amp = False
+
     # Disable AMP for MPS.
     if torch.backends.mps.is_available():
         accelerator.native_amp = False
