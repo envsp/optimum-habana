@@ -1196,6 +1196,10 @@ def main(args):
             text_encoder_three.gradient_checkpointing_enable()
     transformer.to(accelerator.device, dtype=weight_dtype)
 
+    # FIXME: debug only
+    from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+    transformer = FSDP(transformer, device_id = torch.device("hpu", torch.hpu.current_device()))
+
     def unwrap_model(model):
         model = accelerator.unwrap_model(model)
         model = model._orig_mod if is_compiled_module(model) else model
