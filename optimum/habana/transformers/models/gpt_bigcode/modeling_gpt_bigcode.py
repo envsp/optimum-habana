@@ -175,8 +175,8 @@ class GaudiGPTBigCodeAttention(GPTBigCodeAttention):
                 self.attn_pdrop if self.training else 0.0,
                 use_causal_mask,
                 scale,
-                "fast" if flash_attention_fast_softmax else "None",
-                enable_recompute,
+                "fast" if flash_attention_fast_softmax and query_length > 1 else "None",
+                enable_recompute=True if query_length > 1 or os.getenv("QUANT_CONFIG", "") else False ,
             )
 
         if self.multi_query:
