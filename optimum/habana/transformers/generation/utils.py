@@ -2528,7 +2528,7 @@ class GaudiGenerationMixin(GenerationMixin):
                 # Pad the returned past key values tensors from prefill phase forward run to maximum length
                 # before starting the decode phase.
 
-                is_mqa_model = self.config.model_type == "gpt_bigcode" and self.config.multi_query
+                is_mqa_model = self.config.model_type == "xxx" and self.config.multi_query
                 model_kwargs["mqa_model"] = is_mqa_model
                 if is_mqa_model:
                     do_padding = "input_ids" in model_inputs and outputs.past_key_values[0][0].shape[-2] == model_inputs["input_ids"].shape[1]
