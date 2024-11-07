@@ -190,6 +190,17 @@ class GaudiGPTBigCodeAttention(GPTBigCodeAttention):
 
         return sdpa_result, None
 
+    def update(self, prev, cur, dim, idx):
+        orig_cur = cur
+        if prev.shape == cur.shape:
+            prev.copy_(cur)
+            return orig_cur
+        if idx is not None:
+            prev.index_copy_(dim, idx - 1, cur)
+            return prev
+        else:
+            return torch.cat((prev, cur), dim=dim)
+
     def forward(
         self,
         hidden_states: torch.Tensor,
