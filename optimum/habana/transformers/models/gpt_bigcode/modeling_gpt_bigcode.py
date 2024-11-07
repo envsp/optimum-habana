@@ -278,6 +278,10 @@ class GaudiGPTBigCodeAttention(GPTBigCodeAttention):
         attn_output = self.c_proj(attn_output)
         attn_output = self.resid_dropout(attn_output)
 
+        if token_idx is not None and cache_idx is not None and q_len == 1:
+            # Return only past key value shapes and not the tensors during decode phase (q len is 1)
+            # to avoid making past key values as persistent output tensors of HPU graphs.
+            present = (present[0].shape, present[1].shape)
         outputs = (attn_output, present)
         if output_attentions:
             if self.multi_query:
