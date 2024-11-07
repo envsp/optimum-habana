@@ -247,18 +247,44 @@ class GaudiGPTBigCodeAttention(GPTBigCodeAttention):
 
         key, value = key_value.split((self.head_dim, self.head_dim), dim=-1)
 
-        if layer_past is not None:
-            past_key, past_value = layer_past.split((self.head_dim, self.head_dim), dim=-1)
+        if use_cache:
+            if layer_past is None:
+                past_key = torch.zeros(
+                    key.shape, dtype=key.dtype, device=key.device)
+                past_value = torch.zeros(
+                    value.shape, dtype=value.dtype, device=value.device)
+                # Return list instead of tuple
+                present = [past_key, past_value]
+            else:
+                present = layer_past
+                #past_key, past_value = layer_past.split((self.head_dim, self.head_dim), dim=-1)
             if token_idx is not None:
                 # Using out of place version of index_add_() to ensure the intermediate tensors are not lost when HPU graphs are enabled.
-                key = past_key.index_add(1, token_idx - 1, key - torch.index_select(past_key, 1, token_idx - 1))
-                value = past_value.index_add(
-                    1, token_idx - 1, value - torch.index_select(past_value, 1, token_idx - 1)
-                )
+                #key = past_key.index_add(1, token_idx - 1, key - torch.index_select(past_key, 1, token_idx - 1))
+                #value = past_value.index_add(
+                #    1, token_idx - 1, value - torch.index_select(past_value, 1, token_idx - 1)
+                #)
+                key = self.update(present[0], key, -2, token_idx)
+                value = self.update(present[1], value, -2, token_idx)
             else:
                 key = torch.cat((past_key, key), dim=-2)
                 value = torch.cat((past_value, value), dim=-2)
-        present = torch.cat((key, value), dim=-1) if use_cache else None
+
+            #present = torch.cat((key, value), dim=-1) if use_cache else None
+                present = (key, value) if use_cache else None
+
+        # if layer_past is not None:
+        #     past_key, past_value = layer_past.split((self.head_dim, self.head_dim), dim=-1)
+        #     if token_idx is not None:
+        #         # Using out of place version of index_add_() to ensure the intermediate tensors are not lost when HPU graphs are enabled.
+        #         key = past_key.index_add(1, token_idx - 1, key - torch.index_select(past_key, 1, token_idx - 1))
+        #         value = past_value.index_add(
+        #             1, token_idx - 1, value - torch.index_select(past_value, 1, token_idx - 1)
+        #         )
+        #     else:
+        #         key = torch.cat((past_key, key), dim=-2)
+        #         value = torch.cat((past_value, value), dim=-2)
+        # present = torch.cat((key, value), dim=-1) if use_cache else None
 
         if not output_attentions and head_mask is None and use_flash_attention:
             # Difference with the original implementation: there is no need to transpose the key here,
