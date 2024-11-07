@@ -526,7 +526,7 @@ def gaudi_gpt_bigcode_model_forward(
     all_self_attentions = () if output_attentions else None
     all_cross_attentions = () if output_attentions and self.config.add_cross_attention else None
     all_hidden_states = () if output_hidden_states else None
-    for i, (block, layer_past) in enumerate(zip(self.h, past_key_values)):
+    for i, block in enumerate(self.h):
         if output_hidden_states:
             all_hidden_states = all_hidden_states + (hidden_states,)
 
@@ -546,7 +546,7 @@ def gaudi_gpt_bigcode_model_forward(
         else:
             outputs = block(
                 hidden_states,
-                layer_past=layer_past,
+                layer_past=None if past_key_values is None else past_key_values[i],
                 attention_mask=attention_mask,
                 head_mask=head_mask[i],
                 encoder_hidden_states=encoder_hidden_states,
