@@ -216,6 +216,7 @@ class GaudiGPTBigCodeAttention(GPTBigCodeAttention):
         - add new args token_idx, use_flash_attention, flash_attention_recompute, flash_attention_fast_softmax, flash_attention_causal_mask
         - optimize KV cache
         """
+        bsz, q_len, _ = hidden_states.size()
         if use_flash_attention:
             assert (
                 self.fused_scaled_dot_product_attention is not None
